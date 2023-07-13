@@ -69,6 +69,17 @@ def pretty_duration(seconds):
     return duration_formatter(seconds)(seconds)
 
 
+try:
+    multiprocessing.parent_process
+except AttributeError:
+    def in_main_process() -> bool:
+        proc = multiprocessing.current_process()
+        return proc.name == "MainProcess"
+else:
+    def in_main_process() -> bool:
+        return multiprocessing.parent_process() is None
+
+
 def debug_dumps(obj, protocol=None, *, dumps=pickle.dumps):
     t0 = time.perf_counter()
     buf = dumps(obj, protocol)
@@ -78,11 +89,10 @@ def debug_dumps(obj, protocol=None, *, dumps=pickle.dumps):
             f"large/slow multiprocessing IO: {len(buf)/2**20:.2f} MiB",
             f"took {pretty_duration(dt)}",
         ]
-        proc = multiprocessing.current_process()
-        if multiprocessing.parent_process() is None:
-            parts.append(f"in parent {proc.pid}")
+        if in_main_process():
+            parts.append(f"in parent {os.getpid()}")
         else:
-            parts.append(f"in child {proc.pid}")
+            parts.append(f"in child {os.getpid()}")
         print(", ".join(parts), file=sys.stderr)
         sys.stderr.flush()
     return buf
