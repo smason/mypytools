@@ -1,5 +1,6 @@
 import bisect
 import functools
+import multiprocessing
 import os
 import pickle
 import sys
@@ -7,13 +8,16 @@ import time
 import warnings
 from typing import Callable
 
-_TIME_VALS, _TIME_SUFFIX = zip(
-    *[
-        (1e0, "s"),
-        (1e3, "ms"),
-        (1e6, "µs"),
-        (1e9, "ns"),
-    ]
+
+def _unzip(*args):
+    return zip(*args)
+
+
+_TIME_VALS, _TIME_SUFFIX = _unzip(
+    (1e0, "s"),
+    (1e3, "ms"),
+    (1e6, "µs"),
+    (1e9, "ns"),
 )
 
 
@@ -70,17 +74,22 @@ def debug_dumps(obj, protocol=None, *, dumps=pickle.dumps):
     buf = dumps(obj, protocol)
     dt = time.perf_counter() - t0
     if dt > 0.1 or len(buf) > 2**16:
-        print(
-            f"{os.getpid()}) large/slow pickler.dumps() => {len(buf)/2**20:.2f} MiB"
-            f", took {pretty_duration(dt)}",
-            file=sys.stderr,
-        )
+        parts = [
+            f"large/slow multiprocessing IO: {len(buf)/2**20:.2f} MiB",
+            f"took {pretty_duration(dt)}",
+        ]
+        proc = multiprocessing.current_process()
+        if multiprocessing.parent_process() is None:
+            parts.append(f"in parent {proc.pid}")
+        else:
+            parts.append(f"in child {proc.pid}")
+        print(", ".join(parts), file=sys.stderr)
+        sys.stderr.flush()
     return buf
 
 
-def hook_multiprocessing_dumps_time(*, force=True):
-    import multiprocessing
-
+def hook_multiprocessing_dumps_time(*, force=False):
+    "cause multiprocessing to"
     cls = multiprocessing.reduction.ForkingPickler
     if cls.dumps.__module__ != "multiprocessing.reduction" and not force:
         warnings.warn(
@@ -90,10 +99,10 @@ def hook_multiprocessing_dumps_time(*, force=True):
     cls.dumps = functools.partial(debug_dumps, dumps=cls.dumps)
 
 
-class ProcessTimer:
+class ContextTimer:
     "context manager for recording time taken to run code"
 
-    def __init__(self, message, *, file=sys.stderr, prefix=None):
+    def __init__(self, message=None, *, file=sys.stderr, prefix=None):
         self.message = message
         self.prefix = prefix or ("  " if message else "")
         self.file = file
@@ -129,7 +138,7 @@ class ProcessTimer:
         )
         if ctotal > 0:
             lines.append(
-                f"{prefix}Child CPU: user {fmt(cuser)}, sys {fmt(csystem)}, total {fmt(ctotal)} s"
+                f"{prefix}Child CPU: user {fmt(cuser)}, sys {fmt(csystem)}, total {fmt(ctotal)}"
             )
         lines.append(f"{prefix}Wall time: {pretty_duration(wall)}")
         print("\n".join(lines), file=self.file)
