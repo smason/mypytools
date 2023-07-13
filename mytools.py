@@ -73,6 +73,7 @@ try:
     multiprocessing.parent_process
 except AttributeError:
     def in_main_process() -> bool:
+        # via: https://stackoverflow.com/a/50435263/1358308
         proc = multiprocessing.current_process()
         return proc.name == "MainProcess"
 else:
@@ -99,7 +100,7 @@ def debug_dumps(obj, protocol=None, *, dumps=pickle.dumps):
 
 
 def hook_multiprocessing_dumps_time(*, force=False):
-    "cause multiprocessing to"
+    "cause multiprocessing to output a message when pickling large messages"
     cls = multiprocessing.reduction.ForkingPickler
     if cls.dumps.__module__ != "multiprocessing.reduction" and not force:
         warnings.warn(
