@@ -1,52 +1,63 @@
-from typing import Callable
 import bisect
-import sys
-import os
-import time
-import pickle
-import warnings
 import functools
+import os
+import pickle
+import sys
+import time
+import warnings
+from typing import Callable
 
-_TIME_VALS, _TIME_SUFFIX = zip(*[
-    (1e0, 's'),
-    (1e3, 'ms'),
-    (1e6, 'µs'),
-    (1e9, 'ns'),
-])
+_TIME_VALS, _TIME_SUFFIX = zip(
+    *[
+        (1e0, "s"),
+        (1e3, "ms"),
+        (1e6, "µs"),
+        (1e9, "ns"),
+    ]
+)
 
 
 def hhmmss_formatter(seconds: float) -> str:
-    "format seconds as HH:MM:SS"
-    value, ss = divmod(seconds, 60)
+    "format seconds as 'HH:MM:SS hours'"
+    value, ss = divmod(abs(seconds), 60)
     hh, mm = divmod(value, 60)
-    return f'{hh}:{mm:02}:{ss:02.0f} hours'
+    sign = "-" if seconds < 0 else ""
+    return f"{sign}{hh}:{mm:02}:{ss:02.0f} hours"
 
 
 def mmss_formatter(seconds: float) -> str:
-    mm, ss = divmod(seconds, 60)
-    return f'{mm}:{ss:02.0f} minutes'
+    "format seconds as 'MM:SS minutes'"
+    mm, ss = divmod(abs(seconds), 60)
+    sign = "-" if seconds < 0 else ""
+    return f"{sign}{mm}:{ss:02.0f} minutes"
 
 
 def duration_formatter(seconds: float) -> Callable[[float], str]:
     "return a formatter suitable for a given duration"
-    i = bisect.bisect(_TIME_VALS, 1.1 / seconds)
+    seconds = abs(seconds)
+    if seconds > 0:
+        idx = bisect.bisect(_TIME_VALS, 0.9 / seconds)
+    else:
+        idx = 0
 
-    if i == 0:
+    if idx == 0:
         if seconds > 3600:
             return hhmmss_formatter
         if seconds > 60:
             return mmss_formatter
 
-    if i == len(_TIME_VALS):
-        return lambda s: f'{s * 1e9:f} ns'
+    def tiny(seconds):
+        return f"{seconds * 1e9} ns"
 
-    def fn(seconds: float) -> str:
-        seconds *= _TIME_VALS[i]
-        if seconds < 2:
-            return f'{seconds:.2f} {_TIME_SUFFIX[i]}'
-        return f'{seconds:.1f} {_TIME_SUFFIX[i]}'
+    def si(seconds: float) -> str:
+        seconds *= _TIME_VALS[idx]
+        if seconds < 1.2:
+            return f"{seconds:.2f} {_TIME_SUFFIX[idx]}"
+        if seconds < 12:
+            return f"{seconds:.1f} {_TIME_SUFFIX[idx]}"
+        return f"{seconds:.0f} {_TIME_SUFFIX[idx]}"
 
-    return fn
+    return tiny if idx == len(_TIME_VALS) else si
 
 
 def pretty_duration(seconds):
@@ -69,18 +80,22 @@ def debug_dumps(obj, protocol=None, *, dumps=pickle.dumps):
 
 def hook_multiprocessing_dumps_time(*, force=True):
     import multiprocessing
+
     cls = multiprocessing.reduction.ForkingPickler
-    if cls.dumps.__module__ != 'multiprocessing.reduction' and not force:
-        warnings.warn("dumps already seems to be hooked, pass force=True to override")
+    if cls.dumps.__module__ != "multiprocessing.reduction" and not force:
+        warnings.warn(
+            "dumps already seems to be hooked, pass force=True to override"
+        )
         return
     cls.dumps = functools.partial(debug_dumps, dumps=cls.dumps)
 
 
 class ProcessTimer:
     "context manager for recording time taken to run code"
+
     def __init__(self, message, *, file=sys.stderr, prefix=None):
         self.message = message
-        self.prefix = prefix or ('  ' if message else '')
+        self.prefix = prefix or ("  " if message else "")
         self.file = file
 
     def __enter__(self):
@@ -107,9 +122,7 @@ class ProcessTimer:
 
         lines = []
         if message:
-            lines.append(
-                f"=== {message} ==="
-            )
+            lines.append(f"=== {message} ===")
         fmt = duration_formatter(max(total, ctotal))
         lines.append(
             f"{prefix}CPU times: user {fmt(user)}, sys {fmt(system)}, total {fmt(total)}"
@@ -118,7 +131,5 @@ class ProcessTimer:
             lines.append(
                 f"{prefix}Child CPU: user {fmt(cuser)}, sys {fmt(csystem)}, total {fmt(ctotal)} s"
             )
-        lines.append(
-            f"{prefix}Wall time: {pretty_duration(wall)}"
-        )
-        print('\n'.join(lines), file=self.file)
+        lines.append(f"{prefix}Wall time: {pretty_duration(wall)}")
+        print("\n".join(lines), file=self.file)
