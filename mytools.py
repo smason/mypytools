@@ -23,17 +23,17 @@ _TIME_VALS, _TIME_SUFFIX = _unzip(
 
 def hhmmss_formatter(seconds: float) -> str:
     "format seconds as 'HH:MM:SS hours'"
-    value, ss = divmod(abs(seconds), 60)
+    value, ss = divmod(round(abs(seconds)), 60)
     hh, mm = divmod(value, 60)
     sign = "-" if seconds < 0 else ""
-    return f"{sign}{hh}:{mm:02}:{ss:02.0f} hours"
+    return f"{sign}{hh}:{mm:02}:{ss:02} hours"
 
 
 def mmss_formatter(seconds: float) -> str:
     "format seconds as 'MM:SS minutes'"
-    mm, ss = divmod(abs(seconds), 60)
+    mm, ss = divmod(round(abs(seconds)), 60)
     sign = "-" if seconds < 0 else ""
-    return f"{sign}{mm}:{ss:02.0f} minutes"
+    return f"{sign}{mm}:{ss:02} minutes"
 
 
 def duration_formatter(seconds: float) -> Callable[[float], str]:

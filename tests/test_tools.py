@@ -4,6 +4,8 @@ import mytools
 def test_formatter():
     assert mytools.hhmmss_formatter(-1) == "-0:00:01 hours"
     assert mytools.hhmmss_formatter(0) == "0:00:00 hours"
+    assert mytools.hhmmss_formatter(0.4) == "0:00:00 hours"
+    assert mytools.hhmmss_formatter(0.6) == "0:00:01 hours"
     assert mytools.hhmmss_formatter(1) == "0:00:01 hours"
     assert mytools.hhmmss_formatter(60) == "0:01:00 hours"
     assert mytools.hhmmss_formatter(3600) == "1:00:00 hours"
@@ -11,6 +13,8 @@ def test_formatter():
 
     assert mytools.mmss_formatter(-1) == "-0:01 minutes"
     assert mytools.mmss_formatter(0) == "0:00 minutes"
+    assert mytools.mmss_formatter(0.4) == "0:00 minutes"
+    assert mytools.mmss_formatter(0.6) == "0:01 minutes"
     assert mytools.mmss_formatter(1) == "0:01 minutes"
     assert mytools.mmss_formatter(60) == "1:00 minutes"
     assert mytools.mmss_formatter(-60) == "-1:00 minutes"
