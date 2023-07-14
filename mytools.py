@@ -40,7 +40,7 @@ def duration_formatter(seconds: float) -> Callable[[float], str]:
     "return a formatter suitable for a given duration"
     seconds = abs(seconds)
     if seconds > 0:
-        idx = bisect.bisect(_TIME_VALS, 0.9 / seconds)
+        idx = bisect.bisect(_TIME_VALS, 1 / seconds)
     else:
         idx = 0
 
@@ -72,30 +72,29 @@ def pretty_duration(seconds):
 try:
     multiprocessing.parent_process
 except AttributeError:
+
     def in_main_process() -> bool:
         # via: https://stackoverflow.com/a/50435263/1358308
         proc = multiprocessing.current_process()
         return proc.name == "MainProcess"
+
 else:
+
     def in_main_process() -> bool:
         return multiprocessing.parent_process() is None
 
 
-def debug_dumps(obj, protocol=None, *, dumps=pickle.dumps):
-    t0 = time.perf_counter()
+def debug_dumps(obj, protocol=None, *, timer=time.perf_counter, dumps=pickle.dumps):
+    t0 = timer()
     buf = dumps(obj, protocol)
-    dt = time.perf_counter() - t0
+    dt = timer() - t0
     if dt > 0.1 or len(buf) > 2**16:
-        parts = [
-            f"large/slow multiprocessing IO: {len(buf)/2**20:.2f} MiB",
-            f"took {pretty_duration(dt)}",
-        ]
-        if in_main_process():
-            parts.append(f"in parent {os.getpid()}")
-        else:
-            parts.append(f"in child {os.getpid()}")
-        print(", ".join(parts), file=sys.stderr)
-        sys.stderr.flush()
+        name = "parent" if in_main_process() else "child"
+        sys.stderr.write(
+            f"big multiprocessing IO: {len(buf)/2**20:.2f} MiB, "
+            f"encode took {pretty_duration(dt)}, "
+            f"in {name} pid={os.getpid()}\n"
+        )
     return buf
 
 
@@ -104,7 +103,7 @@ def hook_multiprocessing_dumps_time(*, force=False):
     cls = multiprocessing.reduction.ForkingPickler
     if cls.dumps.__module__ != "multiprocessing.reduction" and not force:
         warnings.warn(
-            "dumps already seems to be hooked, pass force=True to override"
+            "multiprocessing already seems to be hooked, pass force=True to override"
         )
         return
     cls.dumps = functools.partial(debug_dumps, dumps=cls.dumps)
@@ -113,9 +112,8 @@ def hook_multiprocessing_dumps_time(*, force=False):
 class ContextTimer:
     "context manager for recording time taken to run code"
 
-    def __init__(self, message=None, *, file=sys.stderr, prefix=None):
+    def __init__(self, message=None, *, file=sys.stderr):
         self.message = message
-        self.prefix = prefix or ("  " if message else "")
         self.file = file
 
     def __enter__(self):
@@ -127,7 +125,6 @@ class ContextTimer:
             return
 
         message = self.message
-        prefix = self.prefix
         t0 = self.start
         t1 = self.stop
 
@@ -140,16 +137,17 @@ class ContextTimer:
         csystem = t1.children_system - t0.children_system
         ctotal = cuser + csystem
 
+        fmt = duration_formatter(max(total, ctotal))
+
         lines = []
         if message:
-            lines.append(f"=== {message} ===")
-        fmt = duration_formatter(max(total, ctotal))
+            lines.append(f" === {message} ===\n")
         lines.append(
-            f"{prefix}CPU times: user {fmt(user)}, sys {fmt(system)}, total {fmt(total)}"
+            f"CPU times: user {fmt(user)}, sys {fmt(system)}, total {fmt(total)}\n"
         )
         if ctotal > 0:
             lines.append(
-                f"{prefix}Child CPU: user {fmt(cuser)}, sys {fmt(csystem)}, total {fmt(ctotal)}"
+                f"Child CPU: user {fmt(cuser)}, sys {fmt(csystem)}, total {fmt(ctotal)}\n"
             )
-        lines.append(f"{prefix}Wall time: {pretty_duration(wall)}")
-        print("\n".join(lines), file=self.file)
+        lines.append(f"Wall time: {pretty_duration(wall)}\n")
+        self.file.write("".join(lines))
