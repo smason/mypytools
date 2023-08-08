@@ -33,9 +33,9 @@ def duration_formatter(seconds: float) -> Callable[[float], str]:
     "return a formatter suitable for a given duration"
     seconds = abs(seconds)
     if seconds > 0:
-        from bisect import bisect
+        from bisect import bisect_left
 
-        idx = bisect(_TIME_VALS, 1 / seconds)
+        idx = bisect_left(_TIME_VALS, 1 / seconds)
     else:
         idx = 0
 
@@ -50,9 +50,9 @@ def duration_formatter(seconds: float) -> Callable[[float], str]:
 
     def si(seconds: float) -> str:
         seconds *= _TIME_VALS[idx]
-        if seconds < 1.2:
+        if seconds <= 1:
             return f"{seconds:.2f} {_TIME_SUFFIX[idx]}"
-        if seconds < 12:
+        if seconds <= 10:
             return f"{seconds:.1f} {_TIME_SUFFIX[idx]}"
         return f"{seconds:.0f} {_TIME_SUFFIX[idx]}"
 
