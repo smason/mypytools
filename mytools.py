@@ -1,17 +1,57 @@
 import sys
-from typing import Any, Iterable, Callable, overload, TextIO
+from typing import Any, Callable, Iterable, TextIO, overload
 
 
 def _unzip(*args):
     return zip(*args)
 
 
-_TIME_VALS, _TIME_SUFFIX = _unzip(
-    (1e0, "s"),
-    (1e3, "ms"),
-    (1e6, "µs"),
-    (1e9, "ns"),
+_METRIC_BASE, _METRIC_SUFFIX = _unzip(
+    (1e-18, "a"),
+    (1e-15, "f"),
+    (1e-12, "p"),
+    (1e-9, "n"),
+    (1e-6, "µ"),
+    (1e-3, "m"),
+    (1, ""),
+    (1e3, "k"),
+    (1e6, "M"),
+    (1e9, "G"),
+    (1e12, "T"),
+    (1e15, "P"),
+    (1e18, "E"),
 )
+
+
+def metric_formatter(value: float, unit: str = "") -> Callable[[float], str]:
+    value = abs(value)
+    if value > 0:
+        from bisect import bisect
+
+        idx = max(0, bisect(_METRIC_BASE, value) - 1)
+        base, suff = _METRIC_BASE[idx], _METRIC_SUFFIX[idx]
+    else:
+        base, suff = 1, ""
+
+    suff = f" {suff}{unit}" if suff or unit else suff
+
+    def fmt(value: float) -> str:
+        value /= base
+        if value < 99.5:
+            if value < 9.95:
+                if value > 0.001:
+                    return f"{value:.2f}{suff}"
+                return f"{value:.4g}{suff}"
+            return f"{value:.1f}{suff}"
+        if value < 9999:
+            return f"{value:.0f}{suff}"
+        return f"{value:.4g}{suff}"
+
+    return fmt
+
+
+def pretty_metric(value: float, unit: str = "") -> str:
+    return metric_formatter(value, unit)(value)
 
 
 def hhmmss_formatter(seconds: float) -> str:
@@ -32,31 +72,11 @@ def mmss_formatter(seconds: float) -> str:
 def duration_formatter(seconds: float) -> Callable[[float], str]:
     "return a formatter suitable for a given duration"
     seconds = abs(seconds)
-    if seconds > 0:
-        from bisect import bisect_left
 
-        idx = bisect_left(_TIME_VALS, 1 / seconds)
-    else:
-        idx = 0
+    if seconds > 60:
+        return hhmmss_formatter if seconds > 3600 else mmss_formatter
 
-    if idx == 0:
-        if seconds > 3600:
-            return hhmmss_formatter
-        if seconds > 60:
-            return mmss_formatter
-
-    def tiny(seconds: float) -> str:
-        return f"{seconds * 1e9} ns"
-
-    def si(seconds: float) -> str:
-        seconds *= _TIME_VALS[idx]
-        if seconds <= 1:
-            return f"{seconds:.2f} {_TIME_SUFFIX[idx]}"
-        if seconds <= 10:
-            return f"{seconds:.1f} {_TIME_SUFFIX[idx]}"
-        return f"{seconds:.0f} {_TIME_SUFFIX[idx]}"
-
-    return tiny if idx == len(_TIME_VALS) else si
+    return metric_formatter(seconds, "s")
 
 
 def pretty_duration(seconds: float) -> str:

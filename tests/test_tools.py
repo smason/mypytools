@@ -1,7 +1,19 @@
 import mytools
 
 
-def test_formatter():
+def test_metric_formatter():
+    assert mytools.pretty_metric(0) == "0"
+    assert mytools.pretty_metric(1) == "1.00"
+    assert mytools.pretty_metric(1000) == "1.00 k"
+    assert mytools.pretty_metric(1010) == "1.01 k"
+    assert mytools.pretty_metric(0.1) == "100 m"
+    assert mytools.pretty_metric(0.01, "m") == "10.0 mm"
+    assert mytools.pretty_metric(2**30) == "1.07 G"
+    assert mytools.pretty_metric(1e-30) == "1e-12 a"
+    assert mytools.pretty_metric(1e30) == "1e+12 E"
+
+
+def test_time_formatter():
     assert mytools.hhmmss_formatter(-1) == "-0:00:01 hours"
     assert mytools.hhmmss_formatter(0) == "0:00:00 hours"
     assert mytools.hhmmss_formatter(0.4) == "0:00:00 hours"
@@ -19,8 +31,8 @@ def test_formatter():
     assert mytools.mmss_formatter(60) == "1:00 minutes"
     assert mytools.mmss_formatter(-60) == "-1:00 minutes"
 
-    assert mytools.pretty_duration(0) == "0.00 s"
-    assert mytools.pretty_duration(1e-10) == "0.1 ns"
+    assert mytools.pretty_duration(0) == "0 s"
+    assert mytools.pretty_duration(1e-10) == "100 ps"
     assert mytools.pretty_duration(1e-9) == "1.00 ns"
     assert mytools.pretty_duration(1e-8) == "10.0 ns"
     assert mytools.pretty_duration(1e-7) == "100 ns"
