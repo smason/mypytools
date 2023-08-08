@@ -1,11 +1,4 @@
-import bisect
-import functools
-import multiprocessing
-import os
-import pickle
 import sys
-import time
-import warnings
 from typing import Callable
 
 
@@ -40,7 +33,9 @@ def duration_formatter(seconds: float) -> Callable[[float], str]:
     "return a formatter suitable for a given duration"
     seconds = abs(seconds)
     if seconds > 0:
-        idx = bisect.bisect(_TIME_VALS, 1 / seconds)
+        from bisect import bisect
+
+        idx = bisect(_TIME_VALS, 1 / seconds)
     else:
         idx = 0
 
@@ -69,44 +64,52 @@ def pretty_duration(seconds):
     return duration_formatter(seconds)(seconds)
 
 
-try:
-    multiprocessing.parent_process
-except AttributeError:
+def _is_current_process_main() -> bool:
+    import multiprocessing
 
-    def in_main_process() -> bool:
+    try:
+        parent = multiprocessing.parent_process
+    except AttributeError:
         # via: https://stackoverflow.com/a/50435263/1358308
         proc = multiprocessing.current_process()
         return proc.name == "MainProcess"
-
-else:
-
-    def in_main_process() -> bool:
-        return multiprocessing.parent_process() is None
+    else:
+        return parent is None
 
 
-def debug_dumps(obj, protocol=None, *, timer=time.perf_counter, dumps=pickle.dumps):
+def _debug_dumps(obj, protocol=None, *, dumps, timer):
     t0 = timer()
     buf = dumps(obj, protocol)
     dt = timer() - t0
     if dt > 0.1 or len(buf) > 2**16:
-        name = "parent" if in_main_process() else "child"
+        from os import getpid
+
+        name = "parent" if _is_current_process_main() else "child"
         sys.stderr.write(
             f"big multiprocessing IO: {len(buf)/2**20:.2f} MiB, "
             f"encode took {pretty_duration(dt)}, "
-            f"in {name} pid={os.getpid()}\n"
+            f"in {name} pid={getpid()}\n"
         )
     return buf
 
 
 def hook_multiprocessing_dumps_time(*, force=False):
+    import functools
+    import time
+    from multiprocessing.reduction import ForkingPickler as cls
+
     "cause multiprocessing to output a message when pickling large messages"
-    cls = multiprocessing.reduction.ForkingPickler
     if cls.dumps.__module__ != "multiprocessing.reduction" and not force:
+        import warnings
+
         warnings.warn(
             "multiprocessing already seems to be hooked, pass force=True to override"
         )
         return
-    cls.dumps = functools.partial(debug_dumps, dumps=cls.dumps)
+
+    cls.dumps = functools.partial(
+        _debug_dumps, dumps=cls.dumps, timer=time.perf_counter
+    )
 
 
 class ContextTimer:
@@ -117,10 +120,14 @@ class ContextTimer:
         self.file = file
 
     def __enter__(self):
-        self.start = os.times()
+        from os import times
+
+        self.start = times()
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.stop = os.times()
+        from os import times
+
+        self.stop = times()
         if self.file is None:
             return
 
