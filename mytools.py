@@ -64,6 +64,21 @@ def pretty_duration(seconds):
     return duration_formatter(seconds)(seconds)
 
 
+def signif(values, digits=3):
+    "Round value(s) to a given number of significant digits."
+    from math import log10
+
+    try:
+        absvalues = map(abs, values)
+    except TypeError:
+        # should get a TypeError when iterating a float
+        n = int(digits - log10(abs(values)))
+        return round(values, n)
+
+    n = int(digits - log10(max(absvalues)))
+    return [round(v, n) for v in values]
+
+
 def _is_current_process_main() -> bool:
     import multiprocessing
 
