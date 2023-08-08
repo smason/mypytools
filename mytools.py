@@ -80,13 +80,13 @@ def signif(
     "Round value(s) to a given number of significant digits."
     from math import log10
 
-    if isinstance(values, float):
+    if isinstance(values, (int, float)):
         # should get a TypeError when iterating a float
-        n = int(digits - log10(abs(values)))
+        n = digits - int(log10(abs(values))) - 1
         return round(values, n)
 
     absvalues: Iterable[float] = map(abs, values)
-    n = int(digits - log10(max(absvalues)))
+    n = digits - int(log10(max(absvalues))) - 1
     return [round(v, n) for v in values]
 
 
@@ -147,7 +147,9 @@ def hook_multiprocessing_dumps_time(*, force: bool = False) -> None:
 class ContextTimer:
     "context manager for recording time taken to run code"
 
-    def __init__(self, message: str = '', *, file: TextIO = sys.stderr) -> None:
+    def __init__(
+        self, message: str = "", *, file: TextIO = sys.stderr
+    ) -> None:
         self.message = message
         self.file = file
 

@@ -33,3 +33,10 @@ def test_formatter():
     assert mytools.pretty_duration(1) == "1.00 s"
     assert mytools.pretty_duration(10) == "10.0 s"
     assert mytools.pretty_duration(100) == "1:40 minutes"
+
+
+def test_signif():
+    assert mytools.signif(1.234) == 1.23
+    assert mytools.signif(1234) == 1230
+    assert mytools.signif([1, 10, 100]) == [1, 10, 100]
+    assert mytools.signif([0.1, 1, 10], 2) == [0, 1, 10]
