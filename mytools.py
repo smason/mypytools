@@ -1,5 +1,5 @@
 import sys
-from typing import Callable
+from typing import Any, Iterable, Callable, overload, TextIO
 
 
 def _unzip(*args):
@@ -45,7 +45,7 @@ def duration_formatter(seconds: float) -> Callable[[float], str]:
         if seconds > 60:
             return mmss_formatter
 
-    def tiny(seconds):
+    def tiny(seconds: float) -> str:
         return f"{seconds * 1e9} ns"
 
     def si(seconds: float) -> str:
@@ -59,22 +59,33 @@ def duration_formatter(seconds: float) -> Callable[[float], str]:
     return tiny if idx == len(_TIME_VALS) else si
 
 
-def pretty_duration(seconds):
+def pretty_duration(seconds: float) -> str:
     "format seconds in a nice human readable format"
     return duration_formatter(seconds)(seconds)
 
 
-def signif(values, digits=3):
+@overload
+def signif(values: float, digits: int) -> float:
+    ...
+
+
+@overload
+def signif(values: Iterable[float], digits: int) -> list[float]:
+    ...
+
+
+def signif(
+    values: float | Iterable[float], digits: int = 3
+) -> float | list[float]:
     "Round value(s) to a given number of significant digits."
     from math import log10
 
-    try:
-        absvalues = map(abs, values)
-    except TypeError:
+    if isinstance(values, float):
         # should get a TypeError when iterating a float
         n = int(digits - log10(abs(values)))
         return round(values, n)
 
+    absvalues: Iterable[float] = map(abs, values)
     n = int(digits - log10(max(absvalues)))
     return [round(v, n) for v in values]
 
@@ -92,7 +103,13 @@ def _is_current_process_main() -> bool:
         return parent is None
 
 
-def _debug_dumps(obj, protocol=None, *, dumps, timer):
+def _debug_dumps(
+    obj: Any,
+    protocol: str | None = None,
+    *,
+    dumps: Callable[..., bytes],
+    timer: Callable[[], float],
+) -> bytes:
     t0 = timer()
     buf = dumps(obj, protocol)
     dt = timer() - t0
@@ -108,7 +125,7 @@ def _debug_dumps(obj, protocol=None, *, dumps, timer):
     return buf
 
 
-def hook_multiprocessing_dumps_time(*, force=False):
+def hook_multiprocessing_dumps_time(*, force: bool = False) -> None:
     import functools
     import time
     from multiprocessing.reduction import ForkingPickler as cls
@@ -130,16 +147,16 @@ def hook_multiprocessing_dumps_time(*, force=False):
 class ContextTimer:
     "context manager for recording time taken to run code"
 
-    def __init__(self, message=None, *, file=sys.stderr):
+    def __init__(self, message: str = '', *, file: TextIO = sys.stderr) -> None:
         self.message = message
         self.file = file
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         from os import times
 
         self.start = times()
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         from os import times
 
         self.stop = times()
