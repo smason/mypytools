@@ -212,3 +212,25 @@ class ContextTimer:
             )
         lines.append(f"Wall time: {pretty_duration(wall)}\n")
         self.file.write("".join(lines))
+
+
+def register_sqlite3_datetime_types() -> None:
+    from datetime import UTC, datetime
+    from sqlite3 import register_adapter, register_converter
+
+    def datetime_adaptor(value: datetime) -> str:
+        tzinfo = value.tzinfo
+        if tzinfo == UTC:
+            return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if tzinfo:
+            return value.isoformat()
+        raise ValueError("Naive datetime", value)
+
+    def datetime_converter(value: bytes) -> datetime:
+        result = datetime.fromisoformat(value.decode("ascii"))
+        if not result.tzinfo:
+            raise ValueError("Naive datetime", result)
+        return result
+
+    register_adapter(datetime, datetime_adaptor)
+    register_converter("datetime", datetime_converter)

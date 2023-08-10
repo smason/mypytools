@@ -1,3 +1,5 @@
+import pytest
+
 import mytools
 
 
@@ -52,3 +54,52 @@ def test_signif():
     assert mytools.signif(1234) == 1230
     assert mytools.signif([1, 10, 100]) == [1, 10, 100]
     assert mytools.signif([0.1, 1, 10], 2) == [0, 1, 10]
+
+
+@pytest.fixture
+def db():
+    import sqlite3
+
+    # save references
+    aref = sqlite3.adapters
+    cref = sqlite3.converters
+    # save existing state
+    astate = dict(aref)
+    cstate = dict(cref)
+    # let the user go with the database
+    yield sqlite3.connect(":memory:", detect_types=sqlite3.PARSE_COLNAMES)
+    # try and undo anything they did
+    aref.clear()
+    cref.clear()
+    aref.update(astate)
+    cref.update(cstate)
+    sqlite3.adapters = aref
+    sqlite3.converters = cref
+
+
+def test_sqlite_types(db):
+    from datetime import UTC, datetime, timedelta, timezone
+
+    mytools.register_sqlite3_datetime_types()
+
+    PLUS4 = timezone(timedelta(hours=4), "plus4")
+
+    good_datetimes = (
+        ("2000-01-01T00:00:00Z", datetime(2000, 1, 1, tzinfo=UTC)),
+        ("2000-01-01T00:00:00+04:00", datetime(2000, 1, 1, tzinfo=PLUS4)),
+    )
+
+    for text, value in good_datetimes:
+        # test converter
+        [[result]] = db.execute('SELECT :text "[datetime]"', locals())
+        assert result == value
+
+        # test adapter
+        [[result]] = db.execute("SELECT :value", locals())
+        assert result == text
+
+    with pytest.raises(ValueError):
+        [row] = db.execute(
+            'SELECT :s "[datetime]"', dict(s="2000-01-01T00:00:00")
+        )
+        print(row)
