@@ -159,9 +159,12 @@ def hook_multiprocessing_dumps_time(*, force: bool = False) -> None:
         )
         return
 
-    cls.dumps = functools.partial(
+    wrapper: Any = functools.partial(
         _debug_dumps, dumps=cls.dumps, timer=time.perf_counter
     )
+    # work around "Cannot assign to a method  [method-assign]"
+    # see https://github.com/python/mypy/issues/2427
+    setattr(cls, "dumps", wrapper)
 
 
 class ContextTimer:
