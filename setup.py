@@ -3,11 +3,11 @@ from setuptools import setup
 setup(
     name="mytools",
     description="My Python Tools",
-    version="0.0.1",
+    version="0.0.2",
     author="Sam Mason",
     author_email="sam@samason.uk",
-    py_modules=["mytools"],
-    python_requires=">=3.7",
+    packages=["mytools"],
+    python_requires=">=3.10",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Programming Language :: Python :: 3",
