@@ -79,8 +79,17 @@ def parse_utc_time(hhmmss: str) -> time:
     return datetime.strptime(hhmmss, "%H%M%S.%f").time().replace(tzinfo=UTC)
 
 
-NMEA_SENTENCE = re.compile(r"\$(.+)\*([0-9A-F]{2})", re.IGNORECASE)
+# Maximum NMEA sentence length, including the $ and <CR><LF> is 82 bytes.
+NMEA_SENTENCE = re.compile(r"\$(.{,120})\*([0-9A-F]{2})", re.IGNORECASE)
 NMEA_FIELDSEP = re.compile(r"\s*,\s*")
+
+# Pxxx   = Vendor specific
+# U[0-9] = User configured
+NMEA_COMMON_TALKERS = re.compile(r"^[A-OQ-TV-Z][A-Z]$")
+# R00 is a rare enough to ignore
+NMEA_COMMON_TYPES = re.compile(r"^[A-Z]{3}$")
+
+NMEA_TAG_FIELD = re.compile(r"^\$([A-OQ-Z][A-Z]|U[0-9])([A-Z]{3}|R00),")
 
 
 def nmea_checksum(sentence: str) -> int:
@@ -94,12 +103,32 @@ def nmea_checksum(sentence: str) -> int:
     return result
 
 
-def nmea_sentences(
-    lines: Iterable[str], *, warn: bool = True
+def read_nmea_sentences(
+    lines: Iterable[str], *, accept_types=(), warn: bool = True
 ) -> Iterable[str]:
+    accept_set = set(accept_types)
+    if warn:
+        for code in accept_set:
+            if not NMEA_COMMON_TYPES.match(code):
+                warnings.warn(
+                    f"{code!r} in accept_types is unlikely to match anything"
+                )
     for line in lines:
         if m := NMEA_SENTENCE.search(line):
             sentence = m.group(0)
+            if accept_set:
+                if tt := NMEA_TAG_FIELD.match(sentence):
+                    talker, type = tt.groups()
+                    # only checking type field at the moment
+                    if type not in accept_set:
+                        continue
+                else:
+                    if warn:
+                        start = f"{sentence:.10}..."
+                        warnings.warn(
+                            f"unusual NMEA tag formatting {start!r}, ignoring sentence"
+                        )
+                    continue
             expected = int(m.group(2), 16)
             calculated = nmea_checksum(sentence)
             if expected == calculated:
