@@ -6,7 +6,7 @@ def test_nmea_rmc():
     from mytools import gnss
 
     sentence = "$GNRMC,153523.00,A,6401.148556,N,02113.221761,W,46.1,40.8,220823,18.2,W,A,V*67"
-    assert gnss.nmea_checksum(sentence) == 0x67
+    assert gnss.nmea_calc_checksum(sentence) == 0x67
     obj = gnss.NmeaRmc.parse(sentence)
     assert obj.talker_id == "GN"
     assert obj.time_utc == time(15, 35, 23, tzinfo=UTC)
@@ -25,7 +25,7 @@ def test_nmea_gga():
     from mytools import gnss
 
     sentence = "$GNGGA,001043.00,4404.14036,N,12118.85961,W,1,12,0.98,1113.0,M,-21.3,M*47"
-    assert gnss.nmea_checksum(sentence) == 0x47
+    assert gnss.nmea_calc_checksum(sentence) == 0x47
     obj = gnss.NmeaGga.parse(sentence)
     assert obj.talker_id == "GN"
     assert obj.time_utc == time(0, 10, 43, tzinfo=UTC)
