@@ -8,6 +8,7 @@ from typing import Callable
 from weakref import WeakSet
 
 import cmarkgfm
+import nh3
 from aiohttp import WSCloseCode, WSMsgType, web
 from watchdog.events import FileModifiedEvent, FileMovedEvent, FileSystemEvent
 from watchdog.observers import Observer
@@ -70,9 +71,12 @@ async def render_markdown(request: web.Request) -> web.Response:
         text = resolve(tail).read_text()
     except IOError:
         raise web.HTTPNotFound()
+    options = cmarkgfm.Options.CMARK_OPT_UNSAFE
+    body = cmarkgfm.github_flavored_markdown_to_html(text, options)
     args = {
-        "body": cmarkgfm.github_flavored_markdown_to_html(text),
         "websocket": json.dumps(f"ws://{request.host}/ws/{tail}"),
+        "title": html.escape(tail),
+        "body": nh3.clean(body),
     }
     text = request.app["template"].substitute(args)
     return web.Response(text=text, content_type="text/html")
@@ -114,6 +118,11 @@ def tree_handler(request: web.Request) -> web.Response:
     router = request.app.router
     tree_router = router["tree"]
     md_router = router["markdown"]
+
+    if not path.is_dir():
+        target = path.parent
+        tail = "" if target == ROOT else f"{target.relative_to(ROOT)}/"
+        raise web.HTTPFound(tree_router.url_for(tail=tail))
 
     def is_visible(child: Path):
         return not child.name.startswith(".")
@@ -168,7 +177,7 @@ def main():
         web.get("/md/{tail:.*}", render_markdown, name="markdown"),
         web.get("/ws/{tail:.*}", websocket_handler),
     ]
-    template = Path(__file__).parent / 'showgfm.html'
+    template = Path(__file__).parent / "showgfm.html"
     app = web.Application()
     app["websockets"] = WeakSet()
     app["template"] = Template(template.read_text())

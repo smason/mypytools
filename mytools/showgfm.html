@@ -1,9 +1,46 @@
 <!doctype html>
 <html lang="en"><head>
   <meta charset="UTF-8" />
+  <title>${title} - GitHub Markdown</title>
+  <style>
+  article {
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+    font-family: Noto Sans;
+    font-size: 16px;
+    line-height: 1.5;
+    word-wrap: break-word;
+  }
+  code, tt {
+    padding: .2em .5em;
+    font-size: 85%;
+    white-space: break-spaces;
+    color: #222;
+    background-color: #f4f6f4;
+    border-radius: 6px;
+  }
+  pre {
+    padding: 16px;
+    overflow: auto;
+    background-color: #f4f6f4;
+    border-radius: 6px;
+  }
+  pre code, pre tt {
+    padding: 0;
+    background-color: transparent;
+    white-space: pre;
+  }
+  blockquote {
+    margin: 0;
+    padding: 0 0 0 1em;
+    color: #444;
+    border-left: 3px solid #eee;
+  }
+  </style>
 </head><body>
 <div class="warn" id="connection-lost" style="display: none">Connection lost, reload to get updates.</div>
-${body}
+<article>${body}</article>
 <script>
 "use strict";
 let unloading = false;
