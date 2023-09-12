@@ -18,4 +18,5 @@ setup(
         "Homepage": "https://github.com/smason/mypytools",
         "Bug Tracker": "https://github.com/smason/mypytools/issues",
     },
+    include_package_data=True,
 )

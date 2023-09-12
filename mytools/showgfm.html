@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head>
+  <meta charset="UTF-8" />
+</head><body>
+<div class="warn" id="connection-lost" style="display: none">Connection lost, reload to get updates.</div>
+${body}
+<script>
+"use strict";
+let unloading = false;
+window.onbeforeunload = function(event) {
+  unloading = true;
+};
+let socket = new WebSocket(${websocket});
+socket.onopen = function(event) {
+  unloading = false;
+};
+socket.onmessage = function(event) {
+  location.reload();
+};
+socket.onclose = function(event) {
+  if (!unloading) {
+    const warn = document.getElementById("connection-lost");
+    warn.style.removeProperty("display");
+  }
+}
+</script></body></html>
