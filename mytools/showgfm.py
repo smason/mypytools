@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from queue import Queue
 from string import Template
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable, NoReturn
 from weakref import WeakSet
 
 import cmarkgfm
@@ -98,8 +98,7 @@ async def render_markdown(request: web.Request) -> web.Response:
     try:
         path = resolve(tail)
         if path.is_dir():
-            tree_router = request.app.router["tree"]
-            raise web.HTTPFound(tree_router.url_for(tail=tail))
+            redirect(request, "tree", tail=tail)
         text = path.read_text()
     except IOError:
         raise web.HTTPNotFound()
@@ -142,14 +141,10 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 async def tree_handler(request: web.Request) -> web.Response:
     path = resolve(request.match_info["tail"])
 
-    router = request.app.router
-    tree_router = router["tree"]
-    md_router = router["markdown"]
-
     if not path.is_dir():
         target = path.parent
         tail = "" if target == ROOT else f"{target.relative_to(ROOT)}/"
-        raise web.HTTPFound(tree_router.url_for(tail=tail))
+        redirect(request, "tree", tail=tail)
 
     def is_visible(child: Path) -> bool:
         return not child.name.startswith(".")
@@ -157,6 +152,10 @@ async def tree_handler(request: web.Request) -> web.Response:
     def key_type_date(child: Path) -> tuple[bool, float]:
         stat = child.stat()
         return child.is_dir(), stat.st_mtime
+
+    router = request.app.router
+    tree_router = router["tree"]
+    md_router = router["markdown"]
 
     children = list(filter(is_visible, path.iterdir()))
     children.sort(key=key_type_date, reverse=True)
@@ -181,10 +180,15 @@ async def tree_handler(request: web.Request) -> web.Response:
     return web.Response(body="".join(result), content_type="text/html")
 
 
+def redirect(request: web.Request, name: str, **kwds) -> None:
+    router = request.app.router[name]
+    raise web.HTTPFound(router.url_for(**kwds))
+
+
 def make_redirecter(
     target: str,
 ) -> Callable[[web.Request], Awaitable[web.Response]]:
-    async def handler(request: web.Request) -> web.Response:
+    async def handler(request: web.Request) -> NoReturn:
         raise web.HTTPFound(location=target)
 
     return handler
