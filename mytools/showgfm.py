@@ -3,8 +3,9 @@ import html
 import json
 import logging
 from pathlib import Path
+from queue import Queue
 from string import Template
-from typing import Callable
+from typing import AsyncIterator, Awaitable, Callable
 from weakref import WeakSet
 
 import cmarkgfm
@@ -15,35 +16,60 @@ from watchdog.observers import Observer
 
 CLOSE_MSG_TYPES = WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED
 
+AsyncPathCallback = Callable[[str], Awaitable[None]]
+
 ROOT = Path.cwd()
 observer = None
-needles: dict[str, set[Callable]] = {}
+needles: dict[str, set[AsyncPathCallback]] = {}
+queue: Queue[str | None] = Queue()
 
 logger = logging.getLogger(__name__)
 
 
 class RootHandler:
-    def dispatch(self, event: FileSystemEvent):
+    def dispatch(self, event: FileSystemEvent) -> None:
         match event:
-            case FileModifiedEvent(src_path=path) if path in needles:
-                pass
-            case FileMovedEvent(dest_path=path) if path in needles:
-                pass
-            case _:
-                return
-        for fn in needles.pop(path):
+            case FileModifiedEvent(src_path=path):
+                queue.put(path)
+            case FileMovedEvent(dest_path=path):
+                queue.put(path)
+
+
+async def _dequeue(loop: asyncio.AbstractEventLoop) -> None:
+    "move sync world to async world"
+
+    async def asyncify() -> AsyncIterator[str | None]:
+        while True:
+            yield await loop.run_in_executor(None, queue.get)
+            # TODO: check if run_in_executor is slow
+            # assuming run_in_executor is slow, we want to batch calls up, so
+            # fetch anything already added to the queue
+            while not queue.empty():
+                yield queue.get_nowait()
+
+    async for path in asyncify():
+        # None is passed to shutdown
+        if path is None:
+            break
+        # is anybody interested
+        if not (fns := needles.get(path)):
+            continue
+        for fn in fns:
             try:
-                fn()
+                await fn(path)
             except Exception:
                 logger.exception("running %s failed", fn)
 
 
-def add_watch(path: Path, callback: Callable) -> Callable[[], None]:
+def add_watch(path: Path, callback: AsyncPathCallback) -> Callable[[], None]:
     global observer
     if not observer:
         observer = Observer()
         observer.schedule(RootHandler(), ROOT, recursive=True)
         observer.start()
+
+        loop = asyncio.get_running_loop()
+        loop.create_task(_dequeue(loop))
 
     pathstr = str(path)
     if existing := needles.get(pathstr):
@@ -51,8 +77,10 @@ def add_watch(path: Path, callback: Callable) -> Callable[[], None]:
     else:
         needles[pathstr] = existing = {callback}
 
-    def cleanup():
+    def cleanup() -> None:
         existing.discard(callback)
+        if not existing:
+            needles.pop(pathstr)
 
     return cleanup
 
@@ -88,13 +116,8 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    loop = asyncio.get_running_loop()
-
-    def reload():
-        def tramp():
-            loop.create_task(ws.send_str("reload"))
-
-        loop.call_soon_threadsafe(tramp)
+    async def reload(path: str) -> None:
+        await ws.send_str("reload")
 
     unwatch = add_watch(path, reload)
 
@@ -112,7 +135,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
-def tree_handler(request: web.Request) -> web.Response:
+async def tree_handler(request: web.Request) -> web.Response:
     path = resolve(request.match_info["tail"])
 
     router = request.app.router
@@ -124,10 +147,10 @@ def tree_handler(request: web.Request) -> web.Response:
         tail = "" if target == ROOT else f"{target.relative_to(ROOT)}/"
         raise web.HTTPFound(tree_router.url_for(tail=tail))
 
-    def is_visible(child: Path):
+    def is_visible(child: Path) -> bool:
         return not child.name.startswith(".")
 
-    def key_type_date(child: Path):
+    def key_type_date(child: Path) -> tuple[bool, float]:
         stat = child.stat()
         return child.is_dir(), stat.st_mtime
 
@@ -154,14 +177,17 @@ def tree_handler(request: web.Request) -> web.Response:
     return web.Response(body="".join(result), content_type="text/html")
 
 
-def make_redirecter(target: str):
-    async def handler(request: web.Request):
+def make_redirecter(
+    target: str,
+) -> Callable[[web.Request], Awaitable[web.Response]]:
+    async def handler(request: web.Request) -> web.Response:
         raise web.HTTPFound(location=target)
 
     return handler
 
 
-async def on_shutdown(app):
+async def on_shutdown(app: web.Application) -> None:
+    queue.put(None)
     websockets = app["websockets"]
     if not websockets:
         return
@@ -170,7 +196,7 @@ async def on_shutdown(app):
         await ws.close(code=WSCloseCode.GOING_AWAY, message="Server shutdown")
 
 
-def main():
+def main() -> None:
     routes = [
         web.get("/", make_redirecter("/tree/")),
         web.get("/tree/{tail:.*}", tree_handler, name="tree"),
@@ -183,9 +209,9 @@ def main():
     app["template"] = Template(template.read_text())
     app.on_shutdown.append(on_shutdown)
     app.add_routes(routes)
-    return app
+    web.run_app(app)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    web.run_app(main())
+    main()
