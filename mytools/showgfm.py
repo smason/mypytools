@@ -85,20 +85,29 @@ def add_watch(path: Path, callback: AsyncPathCallback) -> Callable[[], None]:
     return cleanup
 
 
-def resolve(path: str) -> Path:
-    resolved = Path(path.lstrip("/")).resolve()
+def resolve(tail: str) -> Path:
+    resolved = Path(tail.lstrip("/")).resolve()
     if not resolved.is_relative_to(ROOT):
-        logger.warning("client has a malformed url %r", path)
-        raise IOError("Trying to escape from root")
+        logger.warning("client has a malformed url %r", tail)
+        raise web.HTTPForbidden()
+    if not resolved.exists():
+        raise web.HTTPNotFound()
     return resolved
 
 
-async def render_markdown(request: web.Request) -> web.Response:
+def resolve_file(request: web.Request, tail: str) -> Path:
+    path = resolve(tail)
+    if path.is_dir():
+        redirect(request, "tree", tail=tail)
+    if not path.is_file():
+        raise web.HTTPForbidden()
+    return path
+
+
+async def handle_markdown(request: web.Request) -> web.Response:
     tail = request.match_info["tail"]
+    path = resolve_file(request, tail)
     try:
-        path = resolve(tail)
-        if path.is_dir():
-            redirect(request, "tree", tail=tail)
         text = path.read_text()
     except IOError:
         raise web.HTTPNotFound()
@@ -113,8 +122,8 @@ async def render_markdown(request: web.Request) -> web.Response:
     return web.Response(text=text, content_type="text/html")
 
 
-async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
-    path = resolve(request.match_info["tail"])
+async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
+    path = resolve_file(request, request.match_info["tail"])
 
     ws = web.WebSocketResponse()
     await ws.prepare(request)
@@ -138,7 +147,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
-async def tree_handler(request: web.Request) -> web.Response:
+async def handle_tree(request: web.Request) -> web.Response:
     path = resolve(request.match_info["tail"])
 
     if not path.is_dir():
@@ -207,9 +216,9 @@ async def on_shutdown(app: web.Application) -> None:
 def main() -> None:
     routes = [
         web.get("/", make_redirecter("/tree/")),
-        web.get("/tree/{tail:.*}", tree_handler, name="tree"),
-        web.get("/md/{tail:.*}", render_markdown, name="markdown"),
-        web.get("/ws/{tail:.*}", websocket_handler),
+        web.get("/tree/{tail:.*}", handle_tree, name="tree"),
+        web.get("/md/{tail:.*}", handle_markdown, name="markdown"),
+        web.get("/ws/{tail:.*}", handle_websocket),
     ]
     template = Path(__file__).parent / "showgfm.html"
     app = web.Application()
