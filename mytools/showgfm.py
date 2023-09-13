@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import html
 import json
 import logging
@@ -40,12 +41,17 @@ async def _dequeue(loop: asyncio.AbstractEventLoop) -> None:
 
     async def asyncify() -> AsyncIterator[str | None]:
         while True:
-            yield await loop.run_in_executor(None, queue.get)
+            bunch = {await loop.run_in_executor(None, queue.get)}
+            # try and collect related writes together
+            await asyncio.sleep(0.05)
             # TODO: check if run_in_executor is slow
             # assuming run_in_executor is slow, we want to batch calls up, so
             # fetch anything already added to the queue
             while not queue.empty():
-                yield queue.get_nowait()
+                bunch.add(queue.get_nowait())
+            # hopefully that's everything!
+            for elem in bunch:
+                yield elem
 
     async for path in asyncify():
         # None is passed to shutdown
@@ -104,6 +110,14 @@ def resolve_file(request: web.Request, tail: str) -> Path:
     return path
 
 
+def render_markdown(markdown: str) -> str:
+    body = cmarkgfm.github_flavored_markdown_to_html(
+        markdown,
+        cmarkgfm.Options.CMARK_OPT_UNSAFE,
+    )
+    return nh3.clean(body)
+
+
 async def handle_markdown(request: web.Request) -> web.Response:
     tail = request.match_info["tail"]
     path = resolve_file(request, tail)
@@ -111,25 +125,45 @@ async def handle_markdown(request: web.Request) -> web.Response:
         text = path.read_text()
     except IOError:
         raise web.HTTPNotFound()
-    options = cmarkgfm.Options.CMARK_OPT_UNSAFE
-    body = cmarkgfm.github_flavored_markdown_to_html(text, options)
     args = {
         "websocket": json.dumps(f"ws://{request.host}/ws/{tail}"),
         "title": html.escape(tail),
-        "body": nh3.clean(body),
+        "body": render_markdown(text),
     }
     text = request.app["template"].substitute(args)
     return web.Response(text=text, content_type="text/html")
 
 
+def digest_file(path):
+    hash = hashlib.sha256()
+    with open(path, "rb") as fd:
+        while buf := fd.read(1024 * 1024):
+            hash.update(buf)
+    return hash.digest()
+
+
 async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
     path = resolve_file(request, request.match_info["tail"])
+    try:
+        prev_digest = digest_file(path)
+    except IOError:
+        raise web.HTTPForbidden()
 
     ws = web.WebSocketResponse()
     await ws.prepare(request)
 
-    async def reload(path: str) -> None:
-        await ws.send_str("reload")
+    async def reload(pathstr: str) -> None:
+        try:
+            nonlocal prev_digest
+            digest = digest_file(path)
+            if digest == prev_digest:
+                print("no change")
+                return
+            prev_digest = digest
+            markdown = path.read_text()
+        except IOError:
+            await ws.send_str("reload")
+        await ws.send_str(render_markdown(markdown))
 
     unwatch = add_watch(path, reload)
 

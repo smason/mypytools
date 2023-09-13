@@ -39,7 +39,7 @@
   </style>
 </head><body>
 <div class="warn" id="connection-lost" style="display: none">Connection lost, reload to get updates.</div>
-<article>${body}</article>
+<article id="article">${body}</article>
 <script>
 "use strict";
 let unloading = false;
@@ -51,7 +51,13 @@ socket.onopen = function(event) {
   unloading = false;
 };
 socket.onmessage = function(event) {
-  location.reload();
+  const body = event.data;
+  if (body == "reload") {
+    location.reload();
+  } else {
+    const article = document.getElementById("article");
+    article.innerHTML = body;
+  }
 };
 socket.onclose = function(event) {
   if (!unloading) {
