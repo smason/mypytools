@@ -96,7 +96,11 @@ def resolve(path: str) -> Path:
 async def render_markdown(request: web.Request) -> web.Response:
     tail = request.match_info["tail"]
     try:
-        text = resolve(tail).read_text()
+        path = resolve(tail)
+        if path.is_dir():
+            tree_router = request.app.router["tree"]
+            raise web.HTTPFound(tree_router.url_for(tail=tail))
+        text = path.read_text()
     except IOError:
         raise web.HTTPNotFound()
     options = cmarkgfm.Options.CMARK_OPT_UNSAFE
