@@ -8,6 +8,7 @@ from queue import Queue
 from string import Template
 from typing import AsyncIterator, Awaitable, Callable, NoReturn
 from weakref import WeakSet
+from dataclasses import dataclass
 
 import cmarkgfm
 import nh3
@@ -19,9 +20,18 @@ CLOSE_MSG_TYPES = WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED
 
 AsyncPathCallback = Callable[[str], Awaitable[None]]
 
+
+@dataclass(kw_only=True, slots=True)
+class Watched:
+    parent: Path
+    watch: object
+    children: set[Path]
+
+
 ROOT = Path.cwd()
 observer = None
 needles: dict[str, set[AsyncPathCallback]] = {}
+watchers: dict[Path, Watched] = {}
 queue: Queue[str | None] = Queue()
 
 logger = logging.getLogger(__name__)
@@ -71,7 +81,6 @@ def add_watch(path: Path, callback: AsyncPathCallback) -> Callable[[], None]:
     global observer
     if not observer:
         observer = Observer()
-        observer.schedule(RootHandler(), ROOT, recursive=True)
         observer.start()
 
         loop = asyncio.get_running_loop()
@@ -83,11 +92,27 @@ def add_watch(path: Path, callback: AsyncPathCallback) -> Callable[[], None]:
     else:
         needles[pathstr] = existing = {callback}
 
+    parent = path.parent
+    if parent not in watchers:
+        watchers[parent] = Watched(
+            parent=parent,
+            watch=observer.schedule(RootHandler(), parent),
+            children={path},
+        )
+    else:
+        watchers[parent].children.add(path)
+
     def cleanup() -> None:
         existing.discard(callback)
-        if not existing:
-            needles.pop(pathstr)
-
+        if existing:
+            return
+        needles.pop(pathstr)
+        watch = watchers[parent]
+        watch.children.remove(path)
+        if watch.children:
+            return
+        observer.unschedule(watch.watch)
+        del watchers[parent]
     return cleanup
 
 
