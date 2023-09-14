@@ -38,31 +38,34 @@
   }
   </style>
 </head><body>
-<div class="warn" id="connection-lost" style="display: none">Connection lost, reload to get updates.</div>
+<div class="warn" id="connection-lost" style="display: none">Connection lost, retrying.</div>
 <article id="article">${body}</article>
 <script>
 "use strict";
-let unloading = false;
-window.onbeforeunload = function(event) {
-  unloading = true;
-};
-let socket = new WebSocket(${websocket});
-socket.onopen = function(event) {
-  unloading = false;
-};
-socket.onmessage = function(event) {
-  const body = event.data;
-  if (body == "reload") {
-    location.reload();
-  } else {
-    const article = document.getElementById("article");
-    article.innerHTML = body;
-  }
-};
-socket.onclose = function(event) {
-  if (!unloading) {
-    const warn = document.getElementById("connection-lost");
-    warn.style.removeProperty("display");
-  }
+const conn_lost = document.getElementById("connection-lost");
+const article = document.getElementById("article");
+let backoff;
+const connect = function() {
+  let sock = new WebSocket(${websocket});
+  sock.onopen = function(event) {
+    backoff = 100;
+    conn_lost.style["display"] = "none";
+  };
+  sock.onmessage = function(event) {
+    const body = event.data;
+    if (body == "reload") {
+      location.reload();
+    } else {
+      article.innerHTML = body;
+    }
+  };
+  sock.onerror = function(event) {
+    conn_lost.style.removeProperty("display");
+  };
+  sock.onclose = function(event) {
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, 60*1000);
+  };
 }
+connect();
 </script></body></html>

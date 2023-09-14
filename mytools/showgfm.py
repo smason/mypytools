@@ -157,12 +157,13 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
             nonlocal prev_digest
             digest = digest_file(path)
             if digest == prev_digest:
-                print("no change")
                 return
             prev_digest = digest
             markdown = path.read_text()
         except IOError:
-            await ws.send_str("reload")
+            # ignore reloading for now in the hope that it sorts itself out
+            # again
+            return
         await ws.send_str(render_markdown(markdown))
 
     unwatch = add_watch(path, reload)
