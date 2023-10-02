@@ -1,3 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mytools"
+version = "0.3"
+description = "Sam Mason's Python tools"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  {name = "Sam Mason", email = "sam@samason.uk"},
+]
+
+[project.optional-dependencies]
+all = ["aiohttp", "cmarkgfm", "nh3", "watchdog"]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/smason/mypytools/"
+
+[project.scripts]
+showgfm = "mytools.showgfm:main"
+kalysto = "mytools.kalysto:main"
+
 [tool.isort]
 ensure_newline_before_comments = true
 force_grid_wrap = 0
