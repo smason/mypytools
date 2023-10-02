@@ -8,6 +8,11 @@ setup(
     author_email="sam@samason.uk",
     packages=["mytools"],
     python_requires=">=3.10",
+    entry_points={
+        'console_scripts': [
+            'kalysto = mytools.kalysto:main',
+        ]
+    },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Programming Language :: Python :: 3",
