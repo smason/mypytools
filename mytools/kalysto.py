@@ -3,76 +3,13 @@ import hashlib
 import importlib.util
 import re
 import sys
-import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from queue import Queue
 from types import ModuleType
-from typing import Callable, Generic, Iterator, Optional, Self, TypeVar
+from typing import Self
 
-from watchdog.events import FileModifiedEvent, FileMovedEvent, FileSystemEvent
-from watchdog.observers import Observer
-
-T = TypeVar("T")
-
-
-class WatchdogHandler(Generic[T]):
-    "respond to watchdog's filesystem event notifications"
-
-    queue: Queue[Path]
-    watched: dict[Path, T]
-    parents: set[Path]
-    on_idle: Optional[Callable[[], None]]
-    on_value: Optional[Callable[[], None]]
-
-    def __init__(self) -> None:
-        self.watchdog = Observer()
-        self.queue = Queue()
-        self.watched = dict()
-        self.parents = set()
-        self.on_idle = None
-        self.on_value = None
-
-    def watch(self, path: Path, value: T) -> None:
-        "watch path for changes yielding value in response"
-        self.watched[path] = value
-        parent = path.parent
-        if parent not in self.parents:
-            self.watchdog.schedule(self, parent)
-            self.parents.add(parent)
-
-    def start(self):
-        self.watchdog.start()
-
-    def dispatch(self, event: FileSystemEvent) -> None:
-        "process an incoming event in worker thread"
-        match event:
-            case FileModifiedEvent(src_path=name):
-                pass
-            case FileMovedEvent(dest_path=name):
-                pass
-            case _:
-                return
-        path = Path(name)
-        if path in self.watched:
-            if callback := self.on_value:
-                callback()
-            self.queue.put(path)
-
-    def fetch_paths(self) -> Iterator[T]:
-        "iterate over watches in main thread"
-        queue = self.queue
-        while True:
-            if callback := self.on_idle:
-                callback()
-            collection = {queue.get()}
-            # wait a bit for more events to be dispatched
-            time.sleep(0.01)
-            while not queue.empty():
-                collection.add(queue.get_nowait())
-            for key in collection:
-                yield self.watched[key]
+from .pathevents import FileChanges
 
 
 # integration with Matplotlib's event-loop
@@ -179,7 +116,7 @@ def parse_args():
 def main() -> None:
     args = parse_args()
 
-    handler: WatchdogHandler[WatchedModule] = WatchdogHandler()
+    handler: FileChanges[WatchedModule] = FileChanges()
 
     def add_module(module: ModuleType) -> None:
         value = WatchedModule.from_module(module)
