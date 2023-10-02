@@ -1,7 +1,9 @@
+import asyncio
 import time
+from dataclasses import dataclass
 from queue import Queue
 from pathlib import Path
-from typing import Callable, Generic, Iterator, Optional, TypeVar
+from typing import Callable, Generic, Iterator, Optional, TypeVar, AsyncIterator
 
 from watchdog.events import FileModifiedEvent, FileMovedEvent, FileSystemEvent
 from watchdog.observers import Observer
@@ -10,12 +12,19 @@ from watchdog.observers import Observer
 T = TypeVar("T")
 
 
+@dataclass(kw_only=True, slots=True)
+class Watched:
+    watch: object
+    files: set[object]
+
+
 class FileChanges(Generic[T]):
     "Watch a set of Paths for changes"
 
-    queue: Queue[Path]
-    watched: dict[Path, T]
-    parents: set[Path]
+    # None => shutdown
+    queue: Queue[Optional[Path]]
+    files: dict[Path, T]
+    dirs: dict[Path, Watched]
 
     # event loop hooks:
     #  on_idle will be called before waiting for changes
@@ -26,21 +35,43 @@ class FileChanges(Generic[T]):
     def __init__(self) -> None:
         self.watchdog = Observer()
         self.queue = Queue()
-        self.watched = dict()
-        self.parents = set()
+        self.files = dict()
+        self.dirs = dict()
         self.on_idle = None
         self.on_value = None
 
-    def watch(self, path: Path, value: T) -> None:
+    def watch(self, path: Path, value: T) -> Callable[[], None]:
         "watch path for changes yielding value in response"
-        self.watched[path] = value
+        assert path not in self.files
+        self.files[path] = value
         parent = path.parent
-        if parent not in self.parents:
-            self.watchdog.schedule(self, parent)
-            self.parents.add(parent)
+        if parent in self.dirs:
+            watch = self.dirs[parent]
+        else:
+            watch = self.dirs[parent] = Watched(
+                watch=self.watchdog.schedule(self, parent),
+                files=set(),
+            )
+
+        myself = object()
+        watch.files.add(myself)
+
+        def cleanup() -> None:
+            watch.files.remove(myself)
+            if watch.files:
+                return
+            self.watchdog.unschedule(watch.watch)
+            del self.dirs[parent]
+            del self.files[path]
+
+        return cleanup
 
     def start(self):
         self.watchdog.start()
+
+    def shutdown(self):
+        self.watchdog.stop()
+        self.queue.put(None)
 
     def dispatch(self, event: FileSystemEvent) -> None:
         "process an incoming event in worker thread"
@@ -52,21 +83,34 @@ class FileChanges(Generic[T]):
             case _:
                 return
         path = Path(name)
-        if path in self.watched:
+        if path in self.files:
             if callback := self.on_value:
                 callback()
             self.queue.put(path)
 
+    def _fetch_coalesced(self) -> set[Optional[Path]]:
+        queue = self.queue
+        if callback := self.on_idle:
+            callback()
+        collection = {queue.get()}
+        # wait a bit for more events to be dispatched
+        time.sleep(0.01)
+        while not queue.empty():
+            collection.add(queue.get_nowait())
+        return collection
+
     def fetch_paths(self) -> Iterator[T]:
         "iterate over watches in main thread"
-        queue = self.queue
         while True:
-            if callback := self.on_idle:
-                callback()
-            collection = {queue.get()}
-            # wait a bit for more events to be dispatched
-            time.sleep(0.01)
-            while not queue.empty():
-                collection.add(queue.get_nowait())
-            for key in collection:
-                yield self.watched[key]
+            for key in self._fetch_coalesced():
+                if key is None:
+                    return
+                yield self.files[key]
+
+    async def afetch_paths(self) -> AsyncIterator[T]:
+        loop = asyncio.get_running_loop()
+        while True:
+            for key in await loop.run_in_executor(None, self._fetch_coalesced):
+                if key is None:
+                    return
+                yield self.files[key]

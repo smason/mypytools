@@ -4,115 +4,82 @@ import html
 import json
 import logging
 from pathlib import Path
-from queue import Queue
 from string import Template
-from typing import AsyncIterator, Awaitable, Callable, NoReturn
+from typing import Awaitable, Callable, NoReturn
 from weakref import WeakSet
-from dataclasses import dataclass
 
 import cmarkgfm
 import nh3
 from aiohttp import WSCloseCode, WSMsgType, web
-from watchdog.events import FileModifiedEvent, FileMovedEvent, FileSystemEvent
-from watchdog.observers import Observer
+
+from .pathevents import FileChanges
 
 CLOSE_MSG_TYPES = WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED
 
 AsyncPathCallback = Callable[[str], Awaitable[None]]
 
 
-@dataclass(kw_only=True, slots=True)
-class Watched:
-    parent: Path
-    watch: object
-    children: set[Path]
+class Rendered:
+    subscribed: set[AsyncPathCallback]
+    cleanup: Callable[[], None]
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.digest = digest_file(path)
+        self.subscribed = set()
+
+    async def process(self):
+        try:
+            digest = digest_file(self.path)
+            if digest == self.digest:
+                return
+            markdown = self.path.read_text()
+        except IOError:
+            # ignore reloading for now in the hope that it sorts itself out
+            # again
+            return
+        rendered = render_markdown(markdown)
+        for sub in self.subscribed:
+            await sub(rendered)
 
 
 ROOT = Path.cwd()
-observer = None
-needles: dict[str, set[AsyncPathCallback]] = {}
-watchers: dict[Path, Watched] = {}
-queue: Queue[str | None] = Queue()
+observer: FileChanges[Rendered] = None
+responders: dict[Path, Rendered] = {}
 
 logger = logging.getLogger(__name__)
 
 
-class RootHandler:
-    def dispatch(self, event: FileSystemEvent) -> None:
-        match event:
-            case FileModifiedEvent(src_path=path):
-                queue.put(path)
-            case FileMovedEvent(dest_path=path):
-                queue.put(path)
-
-
-async def _dequeue(loop: asyncio.AbstractEventLoop) -> None:
+async def _dequeue() -> None:
     "move sync world to async world"
 
-    async def asyncify() -> AsyncIterator[str | None]:
-        while True:
-            bunch = {await loop.run_in_executor(None, queue.get)}
-            # try and collect related writes together
-            await asyncio.sleep(0.05)
-            # TODO: check if run_in_executor is slow
-            # assuming run_in_executor is slow, we want to batch calls up, so
-            # fetch anything already added to the queue
-            while not queue.empty():
-                bunch.add(queue.get_nowait())
-            # hopefully that's everything!
-            for elem in bunch:
-                yield elem
-
-    async for path in asyncify():
-        # None is passed to shutdown
-        if path is None:
-            break
-        # is anybody interested
-        if not (fns := needles.get(path)):
-            continue
-        for fn in fns:
-            try:
-                await fn(path)
-            except Exception:
-                logger.exception("running %s failed", fn)
+    async for ren in observer.afetch_paths():
+        try:
+            await ren.process()
+        except Exception:
+            logger.exception("processing %s failed", ren)
 
 
 def add_watch(path: Path, callback: AsyncPathCallback) -> Callable[[], None]:
     global observer
-    if not observer:
-        observer = Observer()
+    if observer is None:
+        observer = FileChanges()
         observer.start()
+        asyncio.create_task(_dequeue())
 
-        loop = asyncio.get_running_loop()
-        loop.create_task(_dequeue(loop))
+    if not (existing := responders.get(path)):
+        responders[path] = existing = Rendered(path)
+        existing.cleanup = observer.watch(path, existing)
 
-    pathstr = str(path)
-    if existing := needles.get(pathstr):
-        existing.add(callback)
-    else:
-        needles[pathstr] = existing = {callback}
-
-    parent = path.parent
-    if parent not in watchers:
-        watchers[parent] = Watched(
-            parent=parent,
-            watch=observer.schedule(RootHandler(), parent),
-            children={path},
-        )
-    else:
-        watchers[parent].children.add(path)
+    existing.subscribed.add(callback)
 
     def cleanup() -> None:
-        existing.discard(callback)
-        if existing:
+        existing.subscribed.discard(callback)
+        if existing.subscribed:
             return
-        needles.pop(pathstr)
-        watch = watchers[parent]
-        watch.children.remove(path)
-        if watch.children:
-            return
-        observer.unschedule(watch.watch)
-        del watchers[parent]
+        del responders[path]
+        existing.cleanup()
+
     return cleanup
 
 
@@ -169,29 +136,15 @@ def digest_file(path):
 
 async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
     path = resolve_file(request, request.match_info["tail"])
-    try:
-        prev_digest = digest_file(path)
-    except IOError:
-        raise web.HTTPForbidden()
 
     ws = web.WebSocketResponse()
-    await ws.prepare(request)
+    unwatch = add_watch(path, ws.send_str)
 
-    async def reload(pathstr: str) -> None:
-        try:
-            nonlocal prev_digest
-            digest = digest_file(path)
-            if digest == prev_digest:
-                return
-            prev_digest = digest
-            markdown = path.read_text()
-        except IOError:
-            # ignore reloading for now in the hope that it sorts itself out
-            # again
-            return
-        await ws.send_str(render_markdown(markdown))
-
-    unwatch = add_watch(path, reload)
+    try:
+        await ws.prepare(request)
+    except Exception:
+        unwatch()
+        raise
 
     websockets = request.app["websockets"]
     websockets.add(ws)
@@ -264,7 +217,7 @@ def make_redirecter(
 
 
 async def on_shutdown(app: web.Application) -> None:
-    queue.put(None)
+    observer.shutdown()
     websockets = app["websockets"]
     if not websockets:
         return
