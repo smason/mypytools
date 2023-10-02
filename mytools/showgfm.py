@@ -33,6 +33,7 @@ class Rendered:
             digest = digest_file(self.path)
             if digest == self.digest:
                 return
+            self.digest = digest
             markdown = self.path.read_text()
         except IOError:
             # ignore reloading for now in the hope that it sorts itself out

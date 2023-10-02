@@ -1,13 +1,19 @@
 import asyncio
 import time
 from dataclasses import dataclass
-from queue import Queue
 from pathlib import Path
-from typing import Callable, Generic, Iterator, Optional, TypeVar, AsyncIterator
+from queue import Queue
+from typing import (
+    AsyncIterator,
+    Callable,
+    Generic,
+    Iterator,
+    Optional,
+    TypeVar,
+)
 
 from watchdog.events import FileModifiedEvent, FileMovedEvent, FileSystemEvent
 from watchdog.observers import Observer
-
 
 T = TypeVar("T")
 
@@ -42,7 +48,8 @@ class FileChanges(Generic[T]):
 
     def watch(self, path: Path, value: T) -> Callable[[], None]:
         "watch path for changes yielding value in response"
-        assert path not in self.files
+        if path in self.files:
+            raise ValueError(f"{path!r} already being watched")
         self.files[path] = value
         parent = path.parent
         if parent in self.dirs:
@@ -57,19 +64,19 @@ class FileChanges(Generic[T]):
         watch.files.add(myself)
 
         def cleanup() -> None:
+            del self.files[path]
             watch.files.remove(myself)
             if watch.files:
                 return
             self.watchdog.unschedule(watch.watch)
             del self.dirs[parent]
-            del self.files[path]
 
         return cleanup
 
-    def start(self):
+    def start(self) -> None:
         self.watchdog.start()
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self.watchdog.stop()
         self.queue.put(None)
 
